@@ -19,18 +19,23 @@
   function lerp(a, b, t) { return a + (b - a) * t; }
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
-  // ---- noise texture for grain ----
-  var noiseCv = document.createElement('canvas');
-  noiseCv.width = 220; noiseCv.height = 220;
+  // ---- noise texture for grain（大きめタイルにしてタイル数を減らす）----
+  var NCELL = 3, NSIZE = 600;
+  var noiseTiles = [];
   (function () {
-    var nx = noiseCv.getContext('2d');
-    var img = nx.createImageData(220, 220);
-    for (var i = 0; i < img.data.length; i += 4) {
-      var v = (Math.random() * 255) | 0;
-      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-      img.data[i + 3] = 255;
+    for (var t = 0; t < 4; t++) {
+      var nc = document.createElement('canvas');
+      nc.width = NSIZE; nc.height = NSIZE;
+      var nx = nc.getContext('2d');
+      var img = nx.createImageData(NSIZE, NSIZE);
+      for (var i = 0; i < img.data.length; i += 4) {
+        var v = 90 + ((Math.random() * 76) | 0);
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+        img.data[i + 3] = 255;
+      }
+      nx.putImageData(img, 0, 0);
+      noiseTiles.push(nc);
     }
-    nx.putImageData(img, 0, 0);
   })();
 
   function quad(ctx, p, fill) {
@@ -105,13 +110,12 @@
     wg.addColorStop(1, lit ? '#14110d' : C.wallLo);
     ctx.fillStyle = wg;
     ctx.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
-    // corner ambient occlusion
-    ctx.save();
-    ctx.strokeStyle = 'rgba(0,0,0,.45)';
-    ctx.lineWidth = 40; ctx.filter = 'blur(24px)';
-    ctx.strokeRect(bx0, by0, bx1 - bx0, by1 - by0);
-    ctx.filter = 'none';
-    ctx.restore();
+    // corner ambient occlusion（安価な内側グラデーション。filter:blur は使わない）
+    var ao = ctx.createRadialGradient(800, 470, 260, 800, 470, 720);
+    ao.addColorStop(0, 'rgba(0,0,0,0)');
+    ao.addColorStop(1, 'rgba(0,0,0,.5)');
+    ctx.fillStyle = ao;
+    ctx.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
     return { bx0: bx0, bx1: bx1, by0: by0, by1: by1 };
   }
 
@@ -135,7 +139,7 @@
     if (env.lightsOn) return;
     ctx.save();
     ctx.globalCompositeOperation = 'screen';
-    var n = 46;
+    var n = 24;
     for (var i = 0; i < n; i++) {
       var seed = i * 97.13;
       var px = 620 + ((Math.sin(seed) * 0.5 + 0.5) * 520);
@@ -168,50 +172,43 @@
     var c = env.c;
     if (c <= 0.001) return;
     ctx.save();
-    // creeping dark from edges
-    var g = ctx.createRadialGradient(VW / 2, VH * 0.46, VH * (0.55 - 0.4 * c), VW / 2, VH / 2, VH * 1.0);
+    // 端から迫る闇（1パスの放射グラデ）
+    var g = ctx.createRadialGradient(VW / 2, VH * 0.46, VH * (0.55 - 0.4 * c), VW / 2, VH / 2, VH);
     g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(0.7, 'rgba(0,0,0,' + (0.4 * c) + ')');
-    g.addColorStop(1, 'rgba(0,0,0,' + (0.82 * c + 0.12) + ')');
+    g.addColorStop(0.7, 'rgba(0,0,0,' + (0.4 * c).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(0,0,0,' + (0.82 * c + 0.12).toFixed(3) + ')');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, VW, VH);
-    // desaturate-ish wash
-    ctx.globalCompositeOperation = 'saturation';
-    ctx.fillStyle = 'rgba(120,120,120,' + (0.85 * c) + ')';
+    // 冷たく色あせた青黒のかぶり（source-over 1パスで近似）
+    ctx.fillStyle = 'rgba(24,30,44,' + (0.5 * c).toFixed(3) + ')';
     ctx.fillRect(0, 0, VW, VH);
-    // cold blue-black multiply (no effect at c=0, deep blue-grey at c=1)
-    ctx.globalCompositeOperation = 'multiply';
-    ctx.fillStyle = 'rgb(' + Math.round(lerp(255, 120, c)) + ',' + Math.round(lerp(255, 140, c)) + ',' + Math.round(lerp(255, 175, c)) + ')';
-    ctx.globalAlpha = 0.7 * c;
-    ctx.fillRect(0, 0, VW, VH);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-    // breathing red at the hour
+    // その時間の脈打つ赤
     if (env.hour) {
-      var pb = 0.06 + 0.10 * Math.max(0, Math.sin(env.t * 1.9));
-      ctx.fillStyle = 'rgba(90,10,10,' + pb + ')';
+      var pb = 0.06 + 0.1 * Math.max(0, Math.sin(env.t * 1.9));
+      ctx.fillStyle = 'rgba(90,10,10,' + pb.toFixed(3) + ')';
       ctx.fillRect(0, 0, VW, VH);
     }
     ctx.restore();
-    // occasional slice glitch
-    if (c > 0.4 && Math.random() < 0.04 * c) {
-      var sy = Math.random() * VH, sh = 8 + Math.random() * 60;
-      var off = (Math.random() - 0.5) * 60 * c;
-      try {
-        var slice = ctx.getImageData(0, sy, VW, sh);
-        ctx.putImageData(slice, off, sy);
-      } catch (e) {}
+    // たまに走る安価な横帯グリッチ（getImageData は使わない）
+    if (c > 0.45 && Math.random() < 0.02) {
+      var sy = Math.random() * VH, sh = 6 + Math.random() * 40;
+      ctx.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,.5)' : 'rgba(150,170,200,.12)';
+      ctx.fillRect(0, sy, VW, sh);
     }
   }
 
+  var _grainN = 0;
   function grain(ctx, env) {
+    _grainN++;
     ctx.save();
-    ctx.globalAlpha = 0.05 + 0.06 * env.c;
+    ctx.globalAlpha = 0.05 + 0.05 * env.c;
     ctx.globalCompositeOperation = 'overlay';
-    var ox = (Math.random() * 120) | 0, oy = (Math.random() * 120) | 0;
-    for (var x = -ox; x < VW; x += 220)
-      for (var y = -oy; y < VH; y += 220)
-        ctx.drawImage(noiseCv, x, y);
+    // 大タイルを 2x2 で敷く（4 drawImage）。タイルとオフセットを回して粒を動かす
+    var tile = noiseTiles[_grainN % 4];
+    var ox = -((_grainN * 53) % NSIZE), oy = -((_grainN * 97) % NSIZE);
+    for (var x = ox; x < VW; x += NSIZE)
+      for (var y = oy; y < VH; y += NSIZE)
+        ctx.drawImage(tile, x, y);
     ctx.restore();
   }
 
@@ -628,10 +625,320 @@
     }
   }
 
+  // ============ 追加の家具（家のほかの部屋） ============
+  function drawInnerDoor(ctx, env, cx, o) {
+    o = o || {};
+    var w = o.w || 300, h = o.h || 600, x = cx - w / 2, y = o.y || 170;
+    ctx.fillStyle = C.woodLo; ctx.fillRect(x - 16, y - 14, w + 32, h + 14);
+    ctx.fillStyle = vgrad(ctx, 0, y, y + h, o.dark ? '#241a16' : C.wood, C.woodLo);
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = 5;
+    ctx.strokeRect(x + 28, y + 34, w - 56, 200);
+    ctx.strokeRect(x + 28, y + 260, w - 56, h - 300);
+    ctx.fillStyle = C.metal;
+    ctx.beginPath(); ctx.arc(x + w - 36, y + h / 2, 11, 0, 7); ctx.fill();
+    if (o.ajar) { // 隙間から暗い部屋
+      ctx.fillStyle = '#04060a'; ctx.fillRect(x, y, 46, h);
+      ctx.save(); ctx.globalCompositeOperation = 'screen';
+      var g = ctx.createLinearGradient(x, 0, x + 60, 0);
+      g.addColorStop(0, 'rgba(150,180,210,.10)'); g.addColorStop(1, 'rgba(150,180,210,0)');
+      ctx.fillStyle = g; ctx.fillRect(x, y, 60, h); ctx.restore();
+    }
+    if (o.underGlow) {
+      ctx.save(); ctx.globalCompositeOperation = 'screen';
+      var ug = ctx.createLinearGradient(0, y + h - 36, 0, y + h + 8);
+      ug.addColorStop(0, o.underGlow + '0)'); ug.addColorStop(1, o.underGlow + '.4)');
+      ctx.fillStyle = ug; ctx.fillRect(x, y + h - 36, w, 42); ctx.restore();
+    }
+    if (o.label) {
+      ctx.fillStyle = 'rgba(210,220,228,.5)'; ctx.font = '18px serif'; ctx.textAlign = 'center';
+      ctx.fillText(o.label, cx, y - 24); ctx.textAlign = 'left';
+    }
+  }
+
+  function drawPhotoRow(ctx, env, y) {
+    // 家族写真。時間がたつほど弟の顔が黒く塗りつぶされる
+    var scratch = env.clock > 150 ? 1 : 0;
+    for (var i = 0; i < 3; i++) {
+      var cx = 440 + i * 180, w = 128, h = 98;
+      ctx.save(); ctx.translate(cx, y); ctx.rotate((i % 2 ? 1 : -1) * 0.02);
+      ctx.fillStyle = '#20242b'; ctx.fillRect(-w / 2 - 8, -h / 2 - 8, w + 16, h + 16);
+      ctx.fillStyle = '#ccc3ab'; ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.fillStyle = '#2b3a48'; ctx.fillRect(-w / 2 + 6, -h / 2 + 6, w - 12, h - 12);
+      // 2 figures: 兄(大)・弟(小)
+      ctx.fillStyle = '#516072';
+      ctx.beginPath(); ctx.ellipse(-16, 18, 14, 30, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(-16, -14, 10, 0, 7); ctx.fill();
+      ctx.fillStyle = '#5b5a48';
+      ctx.beginPath(); ctx.ellipse(18, 24, 10, 20, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(18, 4, 8, 0, 7); ctx.fill();
+      if (scratch) {
+        ctx.strokeStyle = '#1a1410'; ctx.lineWidth = 3;
+        for (var s = 0; s < 9; s++) {
+          ctx.beginPath();
+          ctx.moveTo(6 + Math.random() * 24, -8 + Math.random() * 26);
+          ctx.lineTo(6 + Math.random() * 24, -8 + Math.random() * 26); ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawPhoneStand(ctx, env) {
+    var x = 360, y = 590, w = 200, h = 150;
+    contactShadow(ctx, x + w / 2, y + h + 10, 150, 28, .45);
+    ctx.fillStyle = vgrad(ctx, 0, y, y + h, C.woodHi, C.woodLo);
+    rr(ctx, x, y, w, h, 5); ctx.fill();
+    // old phone
+    ctx.fillStyle = '#22262b'; rr(ctx, x + 40, y - 40, 110, 44, 8); ctx.fill();
+    ctx.fillStyle = '#15181c'; rr(ctx, x + 48, y - 58, 94, 22, 10); ctx.fill();
+    // memo pad
+    ctx.save(); ctx.translate(x + 168, y - 8); ctx.rotate(0.1);
+    ctx.fillStyle = '#d9cfa8'; ctx.fillRect(-22, -16, 44, 32); ctx.restore();
+  }
+
+  function drawHeightMarks(ctx, cx, y) {
+    ctx.strokeStyle = 'rgba(30,24,18,.8)'; ctx.lineWidth = 2;
+    ctx.fillStyle = 'rgba(60,50,40,.9)'; ctx.font = '12px serif';
+    var hs = [[0, '兄6'], [-40, '兄8'], [-92, '兄10'], [-150, '兄13'], [-70, '弟7']];
+    for (var i = 0; i < hs.length; i++) {
+      var yy = y + hs[i][0];
+      ctx.beginPath(); ctx.moveTo(cx - 16, yy); ctx.lineTo(cx + 16, yy); ctx.stroke();
+      ctx.fillText(hs[i][1], cx + 22, yy + 4);
+    }
+  }
+
+  function drawButsudan(ctx, env) {
+    var x = 600, y = 250, w = 400, h = 470;
+    contactShadow(ctx, x + w / 2, y + h + 14, 300, 40, .5);
+    ctx.fillStyle = '#1c1510'; rr(ctx, x - 14, y - 14, w + 28, h + 28, 8); ctx.fill();
+    // interior gold
+    var ig = vgrad(ctx, 0, y, y + h, '#5a4420', '#2a2012');
+    ctx.fillStyle = ig; ctx.fillRect(x, y, w, h);
+    ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = .3;
+    ctx.fillStyle = '#c79a3e'; ctx.fillRect(x + 30, y + 20, w - 60, h - 140); ctx.restore();
+    // photo of the boy (blurred → clear with corruption... but it's the boy either way)
+    ctx.fillStyle = '#e8e0cf'; ctx.fillRect(x + w / 2 - 60, y + 90, 120, 150);
+    ctx.fillStyle = '#3a4654';
+    ctx.beginPath(); ctx.ellipse(x + w / 2, y + 210, 30, 46, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + w / 2, y + 150, 26, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,.12)'; ctx.fillRect(x + w / 2 - 60, y + 90, 120, 150);
+    // candles + incense glow
+    ctx.save(); ctx.globalCompositeOperation = 'screen';
+    var cg = ctx.createRadialGradient(x + w / 2, y + h - 90, 4, x + w / 2, y + h - 90, 120);
+    cg.addColorStop(0, 'rgba(240,190,110,.5)'); cg.addColorStop(1, 'rgba(240,190,110,0)');
+    ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(x + w / 2, y + h - 90, 120, 0, 7); ctx.fill();
+    ctx.restore();
+    // rising incense smoke
+    ctx.save(); ctx.globalAlpha = .12; ctx.strokeStyle = '#cbd3da'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x + w / 2, y + h - 100);
+    for (var k = 0; k < 8; k++) ctx.lineTo(x + w / 2 + Math.sin(env.t * 1.2 + k) * (6 + k * 2), y + h - 100 - k * 22);
+    ctx.stroke(); ctx.restore();
+    // orin bell
+    ctx.fillStyle = '#8a7a3a'; ctx.beginPath(); ctx.arc(x + 60, y + h - 40, 16, Math.PI, 0); ctx.fill();
+  }
+
+  function drawKotatsu(ctx, env) {
+    var x = 560, y = 640, w = 520, h = 60;
+    contactShadow(ctx, x + w / 2, y + 150, 340, 50, .45);
+    // blanket
+    ctx.fillStyle = vgrad(ctx, 0, y, y + 180, '#6a5747', '#2e251d');
+    quad(ctx, [x - 40, y, x + w + 40, y, x + w + 110, y + 200, x - 110, y + 200]);
+    // tabletop
+    ctx.fillStyle = vgrad(ctx, 0, y - 24, y, C.woodHi, C.wood);
+    ctx.fillRect(x - 30, y - 24, w + 60, 26);
+    // two zabuton
+    ctx.fillStyle = '#4a3b3b'; rr(ctx, x - 130, y + 120, 130, 70, 12); ctx.fill();
+    ctx.fillStyle = '#3f3a30'; rr(ctx, x + w, y + 120, 130, 70, 12); ctx.fill();
+    // a dent on the far one (someone sat there)
+    ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.beginPath(); ctx.ellipse(x + w + 65, y + 150, 44, 20, 0, 0, 7); ctx.fill();
+  }
+
+  var _crtStatic = null, _crtN = 0;
+  function drawCRT(ctx, env) {
+    var x = 1050, y = 470, w = 300, h = 250;
+    var sw = w - 60, sh = h - 70;
+    contactShadow(ctx, x + w / 2, y + h + 30, 220, 40, .45);
+    ctx.fillStyle = '#161a1e'; rr(ctx, x, y, w, h, 14); ctx.fill();
+    // 砂嵐はオフスクリーンにためて、数フレームおきに描き替える
+    if (!_crtStatic) { _crtStatic = document.createElement('canvas'); _crtStatic.width = sw; _crtStatic.height = sh; }
+    if ((_crtN++ % 4) === 0) {
+      var sx = _crtStatic.getContext('2d');
+      sx.fillStyle = '#0b0e12'; sx.fillRect(0, 0, sw, sh);
+      sx.globalAlpha = .5;
+      for (var i = 0; i < 140; i++) {
+        sx.fillStyle = Math.random() < .5 ? '#3a4048' : '#12161b';
+        sx.fillRect(Math.random() * sw, Math.random() * sh, 3, 2);
+      }
+      sx.globalAlpha = 1;
+    }
+    ctx.save(); rr(ctx, x + 24, y + 24, sw, sh, 8); ctx.clip();
+    ctx.drawImage(_crtStatic, x + 24, y + 24);
+    ctx.fillStyle = 'rgba(200,210,220,.28)'; ctx.font = '13px serif';
+    var tx = ((-env.t * 40) % 600);
+    ctx.fillText('午前3時44分ごろ　市道で　小学生が　軽乗用車に', x + 30 + tx, y + h - 62);
+    ctx.restore();
+    ctx.save(); ctx.globalCompositeOperation = 'screen';
+    var sg = ctx.createRadialGradient(x + w / 2 - 15, y + h / 2 - 15, 10, x + w / 2 - 15, y + h / 2 - 15, 260);
+    sg.addColorStop(0, 'rgba(120,150,180,.14)'); sg.addColorStop(1, 'rgba(120,150,180,0)');
+    ctx.fillStyle = sg; ctx.fillRect(x - 60, y - 60, w + 120, h + 120); ctx.restore();
+    // legs
+    ctx.fillStyle = C.woodLo; ctx.fillRect(x + 30, y + h, 20, 40); ctx.fillRect(x + w - 50, y + h, 20, 40);
+  }
+
+  function drawWallClock(ctx, env, cx, cy) {
+    ctx.fillStyle = '#1a1a1e'; ctx.beginPath(); ctx.arc(cx, cy, 66, 0, 7); ctx.fill();
+    ctx.fillStyle = '#d9d3c4'; ctx.beginPath(); ctx.arc(cx, cy, 56, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+    for (var i = 0; i < 12; i++) {
+      var a = i / 12 * Math.PI * 2;
+      ctx.beginPath(); ctx.moveTo(cx + Math.sin(a) * 46, cy - Math.cos(a) * 46);
+      ctx.lineTo(cx + Math.sin(a) * 52, cy - Math.cos(a) * 52); ctx.stroke();
+    }
+    // stopped at 3:44
+    ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.sin(2 * Math.PI * (3.73 / 12)) * 30, cy - Math.cos(2 * Math.PI * (3.73 / 12)) * 30); ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.sin(2 * Math.PI * (44 / 60)) * 44, cy - Math.cos(2 * Math.PI * (44 / 60)) * 44); ctx.stroke();
+    ctx.fillStyle = '#1a1a1a'; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 7); ctx.fill();
+  }
+
+  function drawTatami(ctx) {
+    var fg = ctx.createLinearGradient(0, 760, 0, VH);
+    fg.addColorStop(0, '#3a3a2a'); fg.addColorStop(1, '#181811');
+    quad(ctx, [320, 760, 1280, 760, VW, VH, 0, VH], fg);
+    ctx.save(); ctx.globalAlpha = .35; ctx.strokeStyle = '#0d0d08'; ctx.lineWidth = 3;
+    for (var i = -3; i <= 3; i++) {
+      ctx.beginPath(); ctx.moveTo(800 + i * 150, 760); ctx.lineTo(800 + i * 300, VH); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(0, 880); ctx.lineTo(VW, 880); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawFuton(ctx, env) {
+    var x = 560, y = 640, w = 560, h = 200;
+    contactShadow(ctx, x + w / 2, y + h + 10, 360, 40, .4);
+    ctx.fillStyle = vgrad(ctx, 0, y, y + h, '#c9c0ac', '#8f887a');
+    rr(ctx, x, y, w, h, 16); ctx.fill();
+    // 掛け布団 — めくれて、人の形に へこんでいる
+    ctx.fillStyle = vgrad(ctx, 0, y - 10, y + h, '#5b6470', '#2c333c');
+    ctx.beginPath();
+    ctx.moveTo(x + 20, y + h); ctx.lineTo(x + 20, y + 40);
+    ctx.bezierCurveTo(x + 160, y - 30, x + 420, y + 10, x + w - 20, y + 60);
+    ctx.lineTo(x + w - 20, y + h); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.2)'; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(x + 60, y + 120);
+    ctx.bezierCurveTo(x + 240, y + 80, x + 380, y + 150, x + w - 60, y + 110); ctx.stroke();
+    // pillow
+    ctx.fillStyle = '#ded7c6'; rr(ctx, x + 40, y + 20, 150, 60, 18); ctx.fill();
+  }
+
+  function drawShrineShelf(ctx, env) {
+    var x = 480, y = 300, w = 640, h = 300;
+    contactShadow(ctx, x + w / 2, y + h + 10, 320, 26, .35);
+    ctx.fillStyle = C.woodLo; ctx.fillRect(x, y, w, 16);
+    ctx.fillStyle = C.woodLo; ctx.fillRect(x, y + h - 16, w, 16);
+    // many small photos of the boy — faces intact
+    for (var i = 0; i < 10; i++) {
+      var px = x + 40 + (i % 5) * 120, py = y + 30 + ((i / 5) | 0) * 150;
+      ctx.save(); ctx.translate(px, py); ctx.rotate((i % 3 - 1) * 0.03);
+      ctx.fillStyle = '#241f18'; ctx.fillRect(-42, -34, 84, 68);
+      ctx.fillStyle = '#cdb18a'; ctx.fillRect(-36, -28, 72, 56);
+      ctx.fillStyle = '#54606e'; ctx.beginPath(); ctx.arc(0, 6, 15, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, 34, 18, 16, 0, 0, 7); ctx.fill();
+      ctx.restore();
+    }
+    // two candle glows
+    ctx.save(); ctx.globalCompositeOperation = 'screen';
+    [x + 30, x + w - 30].forEach(function (cx2) {
+      var g = ctx.createRadialGradient(cx2, y + h - 30, 3, cx2, y + h - 30, 70);
+      g.addColorStop(0, 'rgba(240,200,120,.5)'); g.addColorStop(1, 'rgba(240,200,120,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx2, y + h - 30, 70, 0, 7); ctx.fill();
+    });
+    ctx.restore();
+  }
+
+  function drawFrontDoor(ctx, env) {
+    var w = 420, h = 720, x = 800 - w / 2, y = 90;
+    ctx.fillStyle = '#161b20'; ctx.fillRect(x - 26, y - 16, w + 52, h + 16);
+    ctx.fillStyle = vgrad(ctx, 0, y, y + h, env.hour ? '#2a1e18' : '#3a3a40', '#181a1e');
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 6;
+    ctx.strokeRect(x + 40, y + 60, w - 80, 240);
+    // frosted glass panel
+    ctx.fillStyle = 'rgba(150,170,190,.14)'; ctx.fillRect(x + 52, y + 72, w - 104, 216);
+    ctx.save(); ctx.globalCompositeOperation = 'screen';
+    var og = ctx.createLinearGradient(0, y, 0, y + 320);
+    og.addColorStop(0, 'rgba(150,180,210,' + (0.18 * (1 - env.c * .5)) + ')');
+    og.addColorStop(1, 'rgba(150,180,210,0)');
+    ctx.fillStyle = og; ctx.fillRect(x + 52, y + 72, w - 104, 216);
+    ctx.restore();
+    // a silhouette behind the glass as the hour nears
+    if (env.figureState === 2 || env.hour) {
+      ctx.fillStyle = 'rgba(10,14,20,' + (env.hour ? .8 : .4) + ')';
+      ctx.beginPath(); ctx.ellipse(800, y + 210, 30, 78, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(800, y + 120, 24, 0, 7); ctx.fill();
+    }
+    // mail slot, chain, knob
+    ctx.fillStyle = '#0e1013'; ctx.fillRect(x + w / 2 - 50, y + 430, 100, 20);
+    ctx.strokeStyle = C.metal; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(x + 30, y + 360); ctx.lineTo(x + 90, y + 380); ctx.stroke();
+    ctx.fillStyle = env.hour ? '#d7c9a0' : C.metal;
+    ctx.beginPath(); ctx.arc(x + 44, y + h / 2 + 40, 14, 0, 7); ctx.fill();
+    // under-door light
+    ctx.save(); ctx.globalCompositeOperation = 'screen';
+    var ug = ctx.createLinearGradient(0, y + h - 44, 0, y + h + 10);
+    var uc = env.hour ? 'rgba(210,70,55,' : 'rgba(150,175,205,';
+    ug.addColorStop(0, uc + '0)'); ug.addColorStop(1, uc + (env.hour ? .55 : .2) + ')');
+    ctx.fillStyle = ug; ctx.fillRect(x, y + h - 44, w, 50); ctx.restore();
+    if (env.hour) {
+      var kb = Math.max(0, Math.sin(env.t * 2.2));
+      ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = kb * 0.2;
+      ctx.fillStyle = '#ff6a5a'; ctx.fillRect(x, y, w, h); ctx.restore();
+    }
+    // doormat「おかえり」
+    ctx.fillStyle = '#3a3226'; quad(ctx, [x + 40, y + h + 30, x + w - 40, y + h + 30, x + w + 40, y + h + 110, x - 40, y + h + 110]);
+    ctx.fillStyle = 'rgba(210,200,170,.55)'; ctx.font = '30px serif'; ctx.textAlign = 'center';
+    ctx.fillText('おかえり', 800, y + h + 88); ctx.textAlign = 'left';
+    // intercom panel
+    ctx.fillStyle = '#c9cdd2'; rr(ctx, x + w + 20, y + 300, 44, 70, 6); ctx.fill();
+    ctx.fillStyle = env.hour ? '#e05a4a' : '#2a2f34'; ctx.beginPath(); ctx.arc(x + w + 42, y + 345, 8, 0, 7); ctx.fill();
+  }
+
+  function drawGetabako(ctx, env) {
+    var x = 470, y = 430, w = 360, h = 320;
+    contactShadow(ctx, x + w / 2, y + h + 10, 240, 28, .4);
+    ctx.fillStyle = vgrad(ctx, 0, y, y + h, C.woodHi, C.woodLo);
+    rr(ctx, x, y, w, h, 5); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 3;
+    for (var r = 0; r < 3; r++) for (var c = 0; c < 2; c++) ctx.strokeRect(x + 14 + c * (w / 2 - 4), y + 14 + r * (h / 3 - 4), w / 2 - 24, h / 3 - 22);
+    // 弟の靴、外向きに そろえてある
+    ctx.fillStyle = '#c33'; ctx.beginPath(); ctx.ellipse(x + w / 2 - 30, y - 6, 26, 12, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + w / 2 + 26, y - 6, 26, 12, 0, 0, 7); ctx.fill();
+    // umbrella stand
+    ctx.fillStyle = '#2a2f34'; rr(ctx, x + w + 30, y + 120, 60, 200, 8); ctx.fill();
+    ctx.strokeStyle = '#4a4038'; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(x + w + 60, y + 130); ctx.lineTo(x + w + 54, y - 30); ctx.stroke();
+  }
+
+  function drawGenkanStep(ctx) {
+    // 三和土（下がった土間）と上がり框
+    ctx.fillStyle = '#0e0f12';
+    quad(ctx, [0, 830, VW, 830, VW, VH, 0, VH]);
+    ctx.fillStyle = C.woodLo; ctx.fillRect(0, 812, VW, 22);
+  }
+
+  function jpWallRim(ctx, env) {
+    ctx.save(); ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = env.lightsOn ? .03 : .09 * (1 - env.c * .6);
+    ctx.fillStyle = C.moon; ctx.fillRect(300, 180, 90, 580); ctx.restore();
+  }
+
   // ================= VIEWS =================
   // returns hotspot list [{id,x,y,w,h,name}]  (virtual coords)
+  // goto つき hotspot はゲーム側で移動として処理される
   var VIEWS = {
-    north: function (ctx, env) {
+    bd_n: function (ctx, env) {
       var b = paintShell(ctx, env);
       moonFloor(ctx, env);
       drawWindow(ctx, env);
@@ -649,7 +956,7 @@
         { id: 'under_desk', x: 590, y: 730, w: 200, h: 60, name: '机の下' },
       ];
     },
-    east: function (ctx, env) {
+    bd_e: function (ctx, env) {
       paintShell(ctx, env);
       // faint moon rim from the left
       ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = env.lightsOn ? .04 : .12 * (1 - env.c * .6);
@@ -671,23 +978,22 @@
         { id: 'bed_head', x: 430, y: 320, w: 70, h: 150, name: 'ヘッドボード' },
       ];
     },
-    south: function (ctx, env) {
+    bd_s: function (ctx, env) {
       paintShell(ctx, env);
       drawDoor(ctx, env);
       drawMirror(ctx, env);
       drawCalendar(ctx, env, 1120, 360);
       return [
         { id: 'peephole', x: 782, y: 252, w: 36, h: 36, name: 'のぞき穴' },
-        { id: 'knob', x: 908, y: 432, w: 56, h: 56, name: 'ドアノブ' },
         { id: 'jacket', x: 470, y: 220, w: 120, h: 190, name: '上着' },
         { id: 'switch', x: 1006, y: 336, w: 52, h: 74, name: '電気のスイッチ' },
         { id: 'calendar', x: 1050, y: 270, w: 140, h: 180, name: 'カレンダー' },
         { id: 'mirror', x: 356, y: 254, w: 224, h: 480, name: '姿見' },
         { id: 'floor_scuff', x: 700, y: 800, w: 300, h: 120, name: '床のこすれ跡' },
-        { id: 'door', x: 620, y: 150, w: 360, h: 620, name: env.hour ? 'ドア' : 'ドア（鍵がかかっている）' },
+        { id: 'door', x: 620, y: 150, w: 360, h: 620, name: 'ドア', goto: 'hw_doors' },
       ];
     },
-    west: function (ctx, env) {
+    bd_w: function (ctx, env) {
       paintShell(ctx, env);
       drawCloset(ctx, env);
       drawShelf(ctx, env);
@@ -706,14 +1012,154 @@
         { id: 'floorboard', x: 800, y: 830, w: 200, h: 90, name: 'ゆかいた' },
       ];
     },
+
+    // ---------------- 廊下 ----------------
+    hw_doors: function (ctx, env) {
+      paintShell(ctx, env);
+      drawInnerDoor(ctx, env, 560, { w: 250, h: 570, label: '弟の部屋' });
+      drawInnerDoor(ctx, env, 1000, { w: 250, h: 570, label: 'お母さん' });
+      drawHeightMarks(ctx, 785, 640);
+      drawInnerDoor(ctx, env, 1285, { w: 180, h: 560, label: '洗面所', underGlow: 'rgba(150,175,205,' });
+      return [
+        { id: 'to_bedroom', x: 445, y: 190, w: 230, h: 560, name: '弟の部屋へ戻る', goto: 'bd_s' },
+        { id: 'to_mom', x: 885, y: 190, w: 230, h: 560, name: 'お母さんの部屋へ', goto: 'mo_a' },
+        { id: 'washroom', x: 1205, y: 200, w: 195, h: 540, name: '洗面所をのぞく' },
+        { id: 'heightmarks', x: 748, y: 450, w: 76, h: 230, name: '柱のきずあと' },
+      ];
+    },
+    hw_living: function (ctx, env) {
+      paintShell(ctx, env);
+      drawPhotoRow(ctx, env, 340);
+      drawInnerDoor(ctx, env, 1090, { w: 320, h: 630, ajar: true, label: '居間', underGlow: 'rgba(150,175,205,' });
+      return [
+        { id: 'family_photos', x: 350, y: 270, w: 470, h: 150, name: '家族の写真' },
+        { id: 'to_living', x: 935, y: 175, w: 320, h: 630, name: '居間へ入る', goto: 'lv_a' },
+      ];
+    },
+    hw_genkan: function (ctx, env) {
+      paintShell(ctx, env);
+      drawWindow(ctx, env, 560);
+      drawPhoneStand(ctx, env);
+      drawInnerDoor(ctx, env, 1060, { w: 320, h: 640, ajar: true, label: '玄関', underGlow: env.hour ? 'rgba(210,70,55,' : 'rgba(150,175,205,' });
+      return [
+        { id: 'hall_window', x: 400, y: 270, w: 320, h: 230, name: '窓の外' },
+        { id: 'phone', x: 360, y: 520, w: 150, h: 90, name: '電話' },
+        { id: 'phone_memo', x: 520, y: 560, w: 80, h: 60, name: 'メモ帳' },
+        { id: 'to_genkan', x: 900, y: 180, w: 320, h: 640, name: '玄関へ行く', goto: 'gk_door' },
+      ];
+    },
+
+    // ---------------- 居間 ----------------
+    lv_a: function (ctx, env) {
+      paintShell(ctx, env);
+      drawTatami(ctx);
+      drawButsudan(ctx, env);
+      drawWallClock(ctx, env, 1180, 320);
+      return [
+        { id: 'butsudan_photo', x: 720, y: 330, w: 160, h: 170, name: '仏壇の写真' },
+        { id: 'butsudan', x: 590, y: 240, w: 420, h: 400, name: '仏壇' },
+        { id: 'orin', x: 600, y: 630, w: 100, h: 80, name: 'おりん' },
+        { id: 'living_clock', x: 1116, y: 256, w: 130, h: 130, name: '掛け時計' },
+        { id: 'lv_exit', x: 240, y: 760, w: 320, h: 200, name: '廊下へ出る', goto: 'hw_living' },
+      ];
+    },
+    lv_b: function (ctx, env) {
+      paintShell(ctx, env);
+      drawTatami(ctx);
+      drawKotatsu(ctx, env);
+      drawCRT(ctx, env);
+      return [
+        { id: 'zabuton_far', x: 1050, y: 740, w: 170, h: 100, name: '奥の座布団' },
+        { id: 'tv', x: 1050, y: 460, w: 320, h: 280, name: 'テレビ' },
+        { id: 'tea', x: 880, y: 680, w: 90, h: 70, name: '湯のみ' },
+        { id: 'kotatsu', x: 470, y: 610, w: 560, h: 240, name: 'こたつ' },
+        { id: 'lv_exit_b', x: 210, y: 300, w: 240, h: 440, name: '廊下へ出る', goto: 'hw_living' },
+      ];
+    },
+
+    // ---------------- お母さんの部屋 ----------------
+    mo_a: function (ctx, env) {
+      paintShell(ctx, env);
+      drawTatami(ctx);
+      jpWallRim(ctx, env);
+      drawFuton(ctx, env);
+      drawCalendar(ctx, env, 1180, 360);
+      return [
+        { id: 'mom_pills', x: 520, y: 650, w: 130, h: 80, name: '枕もとの薬' },
+        { id: 'futon', x: 540, y: 620, w: 580, h: 240, name: '布団' },
+        { id: 'mom_calendar', x: 1110, y: 270, w: 140, h: 190, name: 'カレンダー' },
+        { id: 'mo_exit', x: 220, y: 300, w: 240, h: 440, name: '廊下へ出る', goto: 'hw_doors' },
+      ];
+    },
+    mo_b: function (ctx, env) {
+      paintShell(ctx, env);
+      drawTatami(ctx);
+      drawShrineShelf(ctx, env);
+      return [
+        { id: 'shrine_drawer', x: 700, y: 605, w: 200, h: 70, name: '小さな引き出し' },
+        { id: 'shrine_photos', x: 470, y: 290, w: 660, h: 300, name: '弟の写真' },
+        { id: 'mo_exit_b', x: 220, y: 300, w: 240, h: 440, name: '廊下へ出る', goto: 'hw_doors' },
+      ];
+    },
+
+    // ---------------- 玄関 ----------------
+    gk_door: function (ctx, env) {
+      paintShell(ctx, env);
+      drawGenkanStep(ctx);
+      drawFrontDoor(ctx, env);
+      return [
+        { id: 'front_peephole', x: 772, y: 300, w: 56, h: 56, name: 'のぞき穴' },
+        { id: 'intercom', x: 1016, y: 378, w: 66, h: 96, name: 'インターホン' },
+        { id: 'doormat', x: 560, y: 800, w: 480, h: 120, name: 'マット' },
+        { id: 'front_door', x: 590, y: 90, w: 420, h: 700, name: '玄関の扉' },
+      ];
+    },
+    gk_side: function (ctx, env) {
+      paintShell(ctx, env);
+      drawGenkanStep(ctx);
+      drawGetabako(ctx, env);
+      return [
+        { id: 'brother_shoes', x: 580, y: 396, w: 180, h: 70, name: 'そろえられた靴' },
+        { id: 'getabako', x: 470, y: 430, w: 360, h: 320, name: '下駄箱' },
+        { id: 'umbrella', x: 850, y: 400, w: 120, h: 330, name: '傘立て' },
+        { id: 'gk_exit', x: 1050, y: 300, w: 300, h: 440, name: '廊下へ戻る', goto: 'hw_genkan' },
+      ];
+    },
   };
 
+  var LOCS = {
+    bedroom: { name: '弟の部屋', views: ['bd_n', 'bd_e', 'bd_s', 'bd_w'] },
+    hallway: { name: '廊下', views: ['hw_living', 'hw_doors', 'hw_genkan'] },
+    living: { name: '居間', views: ['lv_a', 'lv_b'] },
+    mom: { name: 'お母さんの部屋', views: ['mo_a', 'mo_b'] },
+    genkan: { name: '玄関', views: ['gk_door', 'gk_side'] },
+  };
+  function locOf(viewId) {
+    for (var k in LOCS) if (LOCS[k].views.indexOf(viewId) >= 0) return k;
+    return 'bedroom';
+  }
+
+  // シーン（家具まで）はオフスクリーンにキャッシュし、状態が変わった時と
+  // 数フレームおきだけ再描画する。毎フレームは 1 回の drawImage で済む。
+  var _sc = { cv: null, cx: null, key: null, hs: null, n: 0 };
   function paint(ctx, view, env) {
-    var hs = VIEWS[view](ctx, env);
-    lampPool(ctx, env._lampX || -999, env._lampY || -999, 1, env);
+    if (!_sc.cv) {
+      _sc.cv = document.createElement('canvas');
+      _sc.cv.width = VW; _sc.cv.height = VH;
+      _sc.cx = _sc.cv.getContext('2d');
+    }
+    var key = view + '|' + env.lightsOn + '|' + env.lampsOn + '|' + env.figureState +
+      '|' + env.reflection + '|' + env.hour + '|' + env.flags.size + '|' + Math.floor(env.clock / 5);
+    if (key !== _sc.key || (_sc.n++ % 3) === 0) {
+      _sc.cx.setTransform(1, 0, 0, 1, 0, 0);
+      _sc.cx.clearRect(0, 0, VW, VH);
+      _sc.hs = VIEWS[view](_sc.cx, env);
+      _sc.key = key;
+    }
+    ctx.drawImage(_sc.cv, 0, 0);
     corruption(ctx, env);
     grain(ctx, env);
-    return hs;
+    return _sc.hs;
   }
 
   // ---- inspect close-up art ----
@@ -812,5 +1258,8 @@
     return false;
   }
 
-  window.ART = { VW: VW, VH: VH, paint: paint, paintInspect: paintInspect, views: Object.keys(VIEWS) };
+  window.ART = {
+    VW: VW, VH: VH, paint: paint, paintInspect: paintInspect,
+    LOCS: LOCS, locOf: locOf, viewsOf: function (loc) { return LOCS[loc].views; },
+  };
 })();

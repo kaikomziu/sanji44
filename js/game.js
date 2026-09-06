@@ -11,7 +11,7 @@
   var S = null;
   function freshState() {
     return {
-      view: 'north',
+      view: 'bd_n',       // viewId（家全体で一意）
       clock: 60,          // 分（22:00 起点）。60 = 23:00
       hour: false,
       ended: false,
@@ -25,8 +25,10 @@
       panelOpen: false,
       hotspots: [],
       hoverId: null,
+      moving: false,
     };
   }
+  function curLoc() { return window.ART.locOf(S.view); }
 
   // ---------- url params ----------
   var Q = location.search.toLowerCase();
@@ -96,6 +98,11 @@
   }
   function knock() { tone(70, 0.16, 'sine', 0.5, 40); setTimeout(function () { noiseBurst(0.05, 0.12); }, 4); }
   function uiClick() { tone(180, 0.05, 'triangle', 0.12, 120); }
+  function footstep() {
+    tone(58, 0.1, 'sine', 0.22, 42);
+    setTimeout(function () { noiseBurst(0.04, 0.06); }, 6);
+    setTimeout(function () { tone(54, 0.09, 'sine', 0.16, 40); }, 150);
+  }
   function heartbeat() { tone(46, 0.14, 'sine', 0.42, 30); setTimeout(function () { tone(44, 0.12, 'sine', 0.3, 28); }, 150); }
   function whisper() {
     if (!AU.on) return;
@@ -152,16 +159,55 @@
       }
     }
   }
+  var _knockTok = 0;
   function enterHour() {
     S.hour = true;
     closePanel();
-    say('3時44分。\n——コン、コン、コン。');
-    var seq = 0;
+    say('3時44分。\n——玄関の扉を、たたく音。', 6000);
+    var seq = 0, tok = ++_knockTok;
     (function kn() {
-      if (S.ended) return;
+      if (!S || S.ended || !S.hour || tok !== _knockTok) return;
       knock(); seq++;
-      if (seq % 3 === 0) setTimeout(kn, 3800); else setTimeout(kn, 620);
+      setTimeout(kn, (seq % 3 === 0) ? 3800 : 620);
     })();
+    setTimeout(updateHourPrompt, 1600);
+  }
+
+  // ---------- 3:44 の対決（いる場所で分岐） ----------
+  var hpEl = document.getElementById('hourprompt');
+  var hpChoices = document.getElementById('hp-choices');
+  function updateHourPrompt() {
+    if (!S || !S.hour || S.ended) { hpEl.classList.remove('show'); return; }
+    if (curLoc() === 'genkan') {
+      hpEl.classList.remove('show');
+      if (!S.panelOpen) openFrontDoor();
+    } else {
+      hpEl.classList.add('show');
+      hpChoices.innerHTML = '';
+      [['音のする方へ 行く', function () { hpEl.classList.remove('show'); goTo('gk_door'); }],
+       ['その場から 動かない', function () { hpEl.classList.remove('show'); ending('bad_wait'); }]
+      ].forEach(function (c) {
+        var b = document.createElement('button');
+        b.className = 'choice'; b.textContent = c[0];
+        b.onclick = function () { uiClick(); c[1](); };
+        hpChoices.appendChild(b);
+      });
+    }
+  }
+  function openFrontDoor() {
+    if (S.ended || S.panelOpen) return;
+    S.seen.add('front_door');
+    S.panelOpen = true;
+    insEl.classList.add('show');
+    renderEntry({
+      title: '3時44分 — 玄関の扉',
+      text: 'ノックが 続いている。すぐ そこに、いる。\nどうする。',
+      choices: [
+        { label: '扉を 開ける', do: function () { ending(understanding() >= 5 ? 'true' : 'normal'); } },
+        { label: 'のぞき穴から 見る', do: function () { ending('bad_peep'); } },
+        { label: '開けずに、うずくまる', do: function () { ending('bad_wait'); } },
+      ],
+    });
   }
 
   // ---------- narration ----------
@@ -250,23 +296,11 @@
   };
   C.bed_head = function () { return { title: 'ヘッドボード', text: '木の 内側に、小さく 彫ってある。\n——「にいちゃん おそい」' }; };
 
-  C.door = function () {
-    if (!S.hour) { tone(90, 0.1, 'square', 0.15); return { title: 'ドア', text: 'ドアノブは 回らない。外側から 押さえられている みたいに、びくとも しない。' }; }
-    return {
-      title: '3時44分 — ドア', text: 'ノックが 続いている。すぐ、そこに いる。\nどうする。',
-      choices: [
-        { label: 'ドアを 開ける', do: function () { ending(understanding() >= 5 ? 'true' : 'normal'); } },
-        { label: 'のぞき穴から 見る', do: function () { ending('bad_peep'); } },
-        { label: '開けずに、ベッドで 息を ひそめる', do: function () { ending('bad_wait'); } },
-      ]
-    };
-  };
   C.peephole = function () {
     if (S.hour) { ending('bad_peep'); return null; }
     var c = corruption();
     return { title: 'のぞき穴', text: c < 0.5 ? '廊下は 真っ暗で、何も 見えない。' : '廊下の 奥に、白い ものが ある。\n近づいて くる——いや、気のせいだ。たぶん。' };
   };
-  C.knob = C.door;
   C.jacket = function () { return { title: '上着', text: '玄関に あるはずの 上着が、この部屋の フックに かかっている。\nあの夜、兄が 着ていた もの。' }; };
   C.switch = function () {
     S.lightsOn = !S.lightsOn; uiClick();
@@ -328,8 +362,114 @@
 
   function advanceIfStuck() {
     // 調べ尽くしたのに時間が余っているとき、待ち時間を進める助け
-    if (S.clock < 300 && S.seen.size > 22) advance(14);
+    if (S.clock < 300 && S.seen.size > 34) advance(14);
   }
+
+  // ================= 家のほかの部屋 =================
+  // ---- 廊下 ----
+  C.washroom = function () {
+    return { title: '洗面所', art: 'mirror', text: '蛇口が わずかに 開いていて、水が 細く 流れ続けている。\n鏡は 曇っている。指で 書いた あとが ある——「まだ？」' };
+  };
+  C.heightmarks = function () {
+    return { title: '柱のきずあと', text: '兄と弟、二人分の 身長の しるし。\n兄の しるしは 大人まで 続いている。\n弟の しるしは、七歳の 高さで、ぷつりと 途切れている。' };
+  };
+  C.family_photos = function () {
+    S.flags.add('_photosSeen');
+    var scratched = S.clock > 150;
+    if (!scratched) return { title: '家族の写真', text: '廊下に ならんだ 家族写真。\nどの写真にも、大きい 男の子と 小さい 男の子。仲が よさそうだ。' };
+    S.flags.add('figure'); // 「消しているのは自分」だと気づく＝理解
+    return { title: '家族の写真', text: 'さっきまで 普通だった 写真の、弟の 顔だけが、どれも 黒く 塗りつぶされている。\nボールペンの あと。強く、何度も。\n……この 手は、見おぼえが ある。自分の 筆圧だ。' };
+  };
+  C.hall_window = function () { return C.window_out(); };
+  C.phone = function () {
+    return { title: '電話', text: '黒い 固定電話。受話器を 取ると、線は 死んでいる。\nそれでも 毎晩 3時44分に なると、一度だけ 鳴るのだと、メモに ある。' };
+  };
+  C.phone_memo = function () {
+    return { title: 'メモ帳', note: ['3:44　でんわ なった', '出たけど だれも いない', 'でも いきづかいだけ きこえた', 'おにいちゃん？'] };
+  };
+
+  // ---- 居間 ----
+  C.butsudan = function () {
+    S.flags.add('butsudanSeen');
+    return { title: '仏壇', text: 'ひらいた ままの 仏壇。線香が 一本、まだ 細く 燃えている。\n誰かが、ついさっき まで ここに いた みたいに。' };
+  };
+  C.butsudan_photo = function () {
+    S.flags.add('mirror'); // 真相フラグ（＝誰が居なくなったのか直視する）
+    var c = corruption();
+    if (c < 0.4) return { title: '遺影', text: '白い 布で 半分 隠れていて、顔が よく 見えない。\n小さな 制服。ランドセルの 記念写真だ。' };
+    return { title: '遺影', text: '布が 落ちている。\n——七歳の 弟の 写真。この家で 顔を 消されずに 残っている、たった 一枚。\n家族写真の 塗りつぶしは、この 顔を 見なくて すむように していた。' };
+  };
+  C.orin = function () {
+    tone(880, 1.6, 'sine', 0.16); setTimeout(function () { tone(1320, 1.4, 'sine', 0.08); }, 40);
+    return { title: 'おりん', text: 'りん、と 澄んだ 音。\n家じゅうの 空気が、少しだけ ほどける。' };
+  };
+  C.living_clock = function () {
+    return { title: '掛け時計', text: '止まっている。3時44分。\nこの家の 時計は 全部 そう。電池を 換えても、次の 晩には また 止まる。' };
+  };
+  C.kotatsu = function () {
+    return { title: 'こたつ', text: 'スイッチは 入ったまま。天板は ほんのり あたたかい。\n二人分の 座布団。片方は、ずっと 誰かが 座っている みたいに へこんでいる。' };
+  };
+  C.zabuton_far = function () {
+    return { title: '奥の座布団', text: 'へこみに 手を 当てる。\n——あたたかい。' };
+  };
+  C.tv = function () {
+    S.flags.add('tvSeen');
+    return { title: 'テレビ', text: '砂嵐の 中を、古い ニュースの 字幕が 流れ続けている。\n「午前3時44分ごろ　市道で　小学生が　軽乗用車に はねられ」\nそこで いつも 切れる。' };
+  };
+  C.tea = function () {
+    return { title: '湯のみ', text: '出しっぱなしの お茶。\n表面に うっすら 膜。何日 経った ものか わからない。' };
+  };
+
+  // ---- お母さんの部屋 ----
+  C.futon = function () {
+    return { title: '布団', text: '掛け布団が 人の 形に めくれている。\nお母さんは 着替えず、服の まま 横に なって、玄関の 物音を 待っている。\nいまは いない。トイレか、台所か。' };
+  };
+  C.mom_pills = function () {
+    return { title: '枕もとの薬', text: '睡眠薬の シート。半分 空。\nその 横に、飲みかけの 水と、弟の 小さな 靴下 片方。' };
+  };
+  C.mom_calendar = function () {
+    return { title: 'カレンダー', text: '日付に ひとつずつ、正の字。\n「◯◯が いなくなって ▢▢日」。数字は、三桁を 超えている。' };
+  };
+  C.shrine_photos = function () {
+    S.flags.add('shrineSeen'); S.flags.add('closet'); // 真相フラグ補完
+    return { title: '弟の写真', text: '棚いっぱいの、弟の 写真。どれも 顔が そのまま。\n笑っている。走っている。兄の 背中に おぶさっている。\nこの家で、弟の 顔を ちゃんと 見ているのは、お母さん だけ。' };
+  };
+  C.shrine_drawer = function () {
+    return {
+      title: '小さな引き出し', text: '棚の 下の 引き出し。',
+      choices: [{ label: '開ける', do: function () {
+        S.flags.add('diary4b');
+        return { title: '弟のてがみ', note: ['おかあさんへ', 'ぼくが おむかえに いけば', 'おにいちゃんも まよわず かえれるよね', 'だから ちょっと そこまで いってくる'] };
+      } }]
+    };
+  };
+
+  // ---- 玄関 ----
+  C.front_door = function () {
+    if (S.hour) { openFrontDoor(); return null; }
+    return { title: '玄関の扉', text: '鍵は かかっていない。\nでも、外に 出る 気には なれない。弟を 待つなら、この家に いなきゃ いけない 気がする。' };
+  };
+  C.front_peephole = function () {
+    if (S.hour) { ending('bad_peep'); return null; }
+    var c = corruption();
+    return { title: 'のぞき穴', text: c < 0.5 ? '外は 暗い。街灯の 光の 輪が ひとつ 見えるだけ。' : '街灯の 下に、小さな 人影。\nこちらを、じっと 見上げている。' };
+  };
+  C.intercom = function () {
+    return { title: 'インターホン', text: '古い 呼び出しボタン。\n3時44分に なると、押されても いないのに 鳴る。毎晩。' };
+  };
+  C.doormat = function () {
+    return { title: 'マット', text: '「おかえり」と 織り込まれた 玄関マット。\n端が ぼろぼろに なるまで、踏まれ続けている。誰の 足で？' };
+  };
+  C.getabako = function () {
+    return { title: '下駄箱', text: '兄の 靴、父の 靴。きちんと しまわれている。\n弟の 靴の 段だけ、空っぽ。履いて 出たまま。' };
+  };
+  C.brother_shoes = function () {
+    S.flags.add('shoesSeen');
+    return { title: 'そろえられた靴', text: '上がり框に、小さな スニーカーが 一足。\nつま先を 外に 向けて、いつでも 出られるように そろえてある。\n——帰ってくる 人の ためか。出ていく 人の ためか。' };
+  };
+  C.umbrella = function () {
+    return { title: '傘立て', text: '傘が 四本。持ち手に 名前。\n弟の 傘だけ、無い。あの夜は、雨だった。' };
+  };
 
   // ---------- panel ----------
   var insEl = document.getElementById('inspect');
@@ -404,6 +544,7 @@
     S.panelOpen = false;
     insEl.classList.remove('show');
     clearInterval(typeTimer);
+    if (S && S.hour && !S.ended) setTimeout(updateHourPrompt, 400);
   }
   document.getElementById('ins-close').onclick = closePanel;
   insEl.onclick = function (e) { if (e.target === insEl) closePanel(); };
@@ -446,7 +587,8 @@
   var fit = { s: 1, ox: 0, oy: 0, dpr: 1 };
   function resize() {
     var r = cv.parentElement.getBoundingClientRect();
-    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    // 塗り面積を抑えるため上限 1.25（レティナでの過大な解像度を避ける）
+    var dpr = Math.min(1.25, window.devicePixelRatio || 1);
     cv.width = r.width * dpr; cv.height = r.height * dpr;
     cv.style.width = r.width + 'px'; cv.style.height = r.height + 'px';
     var s = Math.min(r.width / VW, r.height / VH);
@@ -456,9 +598,12 @@
 
   function frame(now) {
     requestAnimationFrame(frame);
-    if (!S) return;
+    if (!S || document.hidden) return;
     var dt = Math.min(0.05, (now - (frame._l || now)) / 1000);
-    frame._l = now; S.t += dt;
+    frame._l = now;
+    // エンド画面は不透明なので背後の描画は止める（負荷対策）
+    if (S.ended) return;
+    S.t += dt;
 
     // heartbeat
     var c = corruption();
@@ -548,15 +693,44 @@
     } else hotlabelEl.classList.remove('on');
   });
   cv.addEventListener('pointerdown', function (e) {
-    if (S.panelOpen || S.ended) return;
+    if (S.panelOpen || S.ended || S.moving) return;
     var p = toVirtual(e), h = pick(p);
-    if (h) open(h.id);
+    if (!h) return;
+    if (h.goto) goTo(h.goto);
+    else open(h.id);
   });
   cv.addEventListener('pointerleave', function () { reticleEl.classList.remove('on'); hotlabelEl.classList.remove('on'); S.hoverId = null; });
 
+  // ---------- 移動 ----------
+  var fadeEl = document.getElementById('fade');
+  var roomEl = document.getElementById('roomname');
+  function showRoom(name) {
+    roomEl.textContent = '― ' + name + ' ―';
+    roomEl.classList.add('on');
+    clearTimeout(showRoom._t);
+    showRoom._t = setTimeout(function () { roomEl.classList.remove('on'); }, 2200);
+  }
+  function goTo(viewId, cb) {
+    if (S.ended || S.moving) return;
+    S.moving = true;
+    reticleEl.classList.remove('on'); hotlabelEl.classList.remove('on');
+    var wasLoc = curLoc();
+    fadeEl.classList.add('on');
+    footstep();
+    setTimeout(function () {
+      var newLoc = window.ART.locOf(viewId);
+      S.view = viewId;
+      if (newLoc !== wasLoc) showRoom(window.ART.LOCS[newLoc].name);
+      fadeEl.classList.remove('on');
+      S.moving = false;
+      if (S.hour) updateHourPrompt();
+      if (cb) setTimeout(cb, 260);
+    }, 240);
+  }
+
   function rotate(dir) {
-    if (S.panelOpen || S.ended) return;
-    var v = window.ART.views;
+    if (S.panelOpen || S.ended || S.moving) return;
+    var v = window.ART.viewsOf(curLoc());
     var i = (v.indexOf(S.view) + dir + v.length) % v.length;
     S.view = v[i]; uiClick();
   }
@@ -574,12 +748,15 @@
     if (START_CLOCK != null) S.clock = START_CLOCK;
     document.getElementById('title').classList.remove('show');
     document.getElementById('end').classList.remove('show');
+    document.getElementById('hourprompt').classList.remove('show');
+    document.getElementById('fade').classList.remove('on');
+    document.getElementById('roomname').classList.remove('on');
     resize();
     initAudio();
     if (AU.ctx && AU.ctx.state === 'suspended') AU.ctx.resume();
     if (AU.on) AU.master.gain.value = 0.02;
     if (TESTUI) document.getElementById('debug').classList.add('show');
-    setTimeout(function () { say('弟の 部屋。あの夜から、この時計だけ、時間が 進まない。', 6000); }, 500);
+    setTimeout(function () { say('弟の 部屋。あの夜から、この家の 時計は ぜんぶ、3時44分で 止まったまま。', 6500); }, 500);
     checkMilestones();
   }
   document.getElementById('startBtn').onclick = begin;
