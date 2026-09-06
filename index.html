@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>3時44分</title>
+<meta name="description" content="一晩で完結する一人称の部屋探索ホラー。行動するたび時計が進み、3時44分に「その時間」が訪れる。" />
+<link rel="canonical" href="https://kaikomziu.github.io/sanji44/" />
+<meta property="og:title" content="3時44分" />
+<meta property="og:description" content="行動するたび時計が進む。3時44分、ドアの向こうから来る。" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://kaikomziu.github.io/sanji44/" />
+<meta name="theme-color" content="#05070b" />
+<style>
+  :root{
+    --ink:#05070b; --panel:#0c1119; --line:#1e2a38;
+    --paper:#d8c7a2; --paper-ink:#231c12;
+    --moon:#9fc2e0; --dim:#6a7c8c; --accent:#8a2020;
+    --mono:"SF Mono",ui-monospace,"DejaVu Sans Mono",Menlo,Consolas,monospace;
+    --serif:"Hiragino Mincho ProN","Yu Mincho",YuMincho,"MS Mincho",serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--ink);color:#c9d4de;font-family:var(--serif);overflow:hidden;overscroll-behavior:none}
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 120% at 50% 40%,#0a0f16 0%,#05070b 70%)}
+  #frame{position:relative;width:100%;height:100%;max-width:calc(100vh * 1.6);max-height:calc(100vw / 1.6)}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;image-rendering:auto;touch-action:none}
+  /* ---- HUD ---- */
+  #hud{position:absolute;inset:0;pointer-events:none;font-family:var(--mono)}
+  #clock{position:absolute;top:3.2%;left:50%;transform:translateX(-50%);font-size:clamp(18px,3.4vw,30px);letter-spacing:.22em;color:#cdd9e4;text-shadow:0 0 14px rgba(0,0,0,.9),0 0 30px rgba(120,150,180,.15);transition:color .6s,text-shadow .6s}
+  #clock.late{color:#e7d3d3;text-shadow:0 0 16px rgba(120,20,20,.6),0 0 40px rgba(120,20,20,.3)}
+  #subtitle{position:absolute;left:50%;bottom:12%;transform:translateX(-50%);width:82%;text-align:center;font-family:var(--serif);font-size:clamp(14px,2.4vw,21px);line-height:1.7;color:#e6ecf1;text-shadow:0 2px 10px #000,0 0 24px #000;opacity:0;transition:opacity .5s}
+  #subtitle.show{opacity:1}
+  /* nav arrows */
+  .nav{position:absolute;top:50%;transform:translateY(-50%);width:12%;height:34%;pointer-events:auto;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .25s;background:linear-gradient(var(--d),rgba(0,0,0,0),rgba(0,0,0,.0))}
+  #navL{left:0}#navR{right:0}
+  .nav:hover{opacity:1}
+  .nav svg{width:34px;height:34px;filter:drop-shadow(0 0 6px #000)}
+  .nav .hint{position:absolute;bottom:16%;font-family:var(--mono);font-size:11px;letter-spacing:.15em;color:#aebdcb;opacity:.0;transition:opacity .2s}
+  .nav:hover .hint{opacity:.85}
+  #reticle{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;border:1px solid rgba(220,230,240,.75);border-radius:50%;pointer-events:none;opacity:0;transition:opacity .15s,transform .12s;mix-blend-mode:screen}
+  #reticle.on{opacity:1}
+  #hotlabel{position:absolute;font-family:var(--mono);font-size:12px;letter-spacing:.08em;color:#eef4f8;text-shadow:0 1px 6px #000;pointer-events:none;opacity:0;transform:translate(-50%,-230%);white-space:nowrap;transition:opacity .15s}
+  #hotlabel.on{opacity:.92}
+
+  /* ---- inspect overlay ---- */
+  #inspect{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(3,5,8,.66);backdrop-filter:blur(3px);pointer-events:auto;padding:5%}
+  #inspect.show{display:flex}
+  #ins-card{position:relative;width:min(560px,92%);max-height:86%;overflow:hidden;background:linear-gradient(180deg,#0e141d,#0a0e15);border:1px solid var(--line);box-shadow:0 30px 90px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.03);display:flex;flex-direction:column}
+  #ins-art{width:100%;aspect-ratio:16/10;background:#070a0f;border-bottom:1px solid var(--line);display:block}
+  #ins-art.hidden{display:none}
+  #ins-body{padding:22px 24px 20px;overflow-y:auto;font-family:var(--serif)}
+  #ins-title{font-family:var(--mono);font-size:12px;letter-spacing:.24em;color:var(--dim);text-transform:uppercase;margin-bottom:12px}
+  #ins-text{font-size:16px;line-height:2.0;color:#dbe3ea;white-space:pre-wrap;min-height:2em}
+  #ins-text .p{font-family:var(--paper-ink);color:var(--paper);background:linear-gradient(180deg,#d8c7a2,#c9b590);color:#2a2013;padding:14px 16px;margin:10px 0;font-family:var(--serif);box-shadow:0 8px 24px rgba(0,0,0,.5);transform:rotate(-.4deg)}
+  #ins-choices{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+  .choice{font-family:var(--mono);font-size:13px;letter-spacing:.06em;color:#d7e0e8;background:#121a24;border:1px solid var(--line);padding:10px 16px;cursor:pointer;transition:background .15s,border-color .15s}
+  .choice:hover{background:#1a2530;border-color:#33475a}
+  #ins-close{position:absolute;top:8px;right:12px;font-family:var(--mono);font-size:20px;color:var(--dim);cursor:pointer;padding:6px 10px;z-index:2}
+  #ins-close:hover{color:#e6ecf1}
+
+  /* ---- title / end screens ---- */
+  .screen{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:auto;background:radial-gradient(120% 100% at 50% 45%,#0a0f17,#04060a 75%);padding:8%}
+  .screen.show{display:flex}
+  #title h1{font-family:var(--serif);font-size:clamp(40px,10vw,92px);letter-spacing:.14em;color:#e9eef3;text-shadow:0 0 30px rgba(120,150,180,.18);margin-bottom:6px}
+  #title .tag{font-family:var(--mono);font-size:clamp(11px,2.2vw,14px);letter-spacing:.36em;color:var(--dim);margin-bottom:44px}
+  .btn{font-family:var(--mono);font-size:14px;letter-spacing:.18em;color:#dbe4ec;background:transparent;border:1px solid #2b3b4c;padding:14px 34px;cursor:pointer;transition:background .2s,letter-spacing .2s;text-transform:uppercase}
+  .btn:hover{background:#111925;letter-spacing:.26em}
+  #title .note{margin-top:34px;font-family:var(--mono);font-size:11px;color:#3f4d5b;line-height:1.9;letter-spacing:.05em}
+  #end h2{font-family:var(--serif);font-size:clamp(26px,6vw,46px);letter-spacing:.1em;color:#e9eef3;margin-bottom:20px}
+  #end p{font-family:var(--serif);font-size:clamp(14px,2.6vw,18px);line-height:2;color:#b9c4ce;max-width:34em;margin-bottom:14px}
+  #end .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--dim);margin-bottom:26px;text-transform:uppercase}
+  #end .btn{margin-top:26px}
+
+  /* ---- debug ---- */
+  #debug{position:absolute;left:8px;bottom:8px;font-family:var(--mono);font-size:11px;color:#7f8c99;background:rgba(0,0,0,.6);border:1px solid #223040;padding:8px 10px;display:none;pointer-events:auto;z-index:9}
+  #debug.show{display:block}
+  #debug button{font:inherit;color:#cfe;background:#152030;border:1px solid #2b3f52;margin:2px;padding:3px 7px;cursor:pointer}
+  #version-badge{position:absolute;right:8px;bottom:8px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:#33414f;pointer-events:auto;cursor:pointer;z-index:9}
+  #changelog{position:absolute;inset:0;display:none;background:rgba(3,5,8,.9);pointer-events:auto;z-index:20;padding:6%;overflow-y:auto}
+  #changelog.show{display:block}
+  #changelog h3{font-family:var(--mono);letter-spacing:.2em;color:#cdd9e4;margin-bottom:18px}
+  .cl-entry{border-left:2px solid #263544;padding-left:14px;margin-bottom:16px}
+  .cl-entry h4{font-family:var(--mono);color:#dbe4ec;margin-bottom:6px}
+  .cl-entry h4 span{color:#4f5d6b;font-weight:400;font-size:.8em;margin-left:8px}
+  .cl-entry li{font-family:var(--serif);color:#aeb9c4;line-height:1.8;margin-left:18px}
+  #changelog .btn{margin-top:10px}
+
+  #vignette{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 180px 40px rgba(0,0,0,.7),inset 0 0 60px 10px rgba(0,0,0,.5)}
+  @media (max-width:640px){
+    #ins-text{font-size:15px;line-height:1.9}
+    .nav{opacity:.5}
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="frame">
+    <canvas id="game"></canvas>
+    <div id="vignette"></div>
+
+    <div id="hud">
+      <div id="clock">23:00</div>
+      <div id="subtitle"></div>
+      <div id="reticle"></div>
+      <div id="hotlabel"></div>
+      <div class="nav" id="navL" style="--d:to right">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#e6ecf1" stroke-width="1.6"><path d="M15 5l-7 7 7 7"/></svg>
+        <span class="hint">← 左をむく</span>
+      </div>
+      <div class="nav" id="navR" style="--d:to left">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#e6ecf1" stroke-width="1.6"><path d="M9 5l7 7-7 7"/></svg>
+        <span class="hint">右をむく →</span>
+      </div>
+    </div>
+
+    <div id="inspect">
+      <div id="ins-card">
+        <span id="ins-close">✕</span>
+        <canvas id="ins-art" width="560" height="350"></canvas>
+        <div id="ins-body">
+          <div id="ins-title">しらべる</div>
+          <div id="ins-text"></div>
+          <div id="ins-choices"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="screen" id="title">
+      <h1>3時44分</h1>
+      <div class="tag">A ROOM, ONE NIGHT</div>
+      <button class="btn" id="startBtn">はじめる</button>
+      <div class="note">
+        ヘッドホン推奨 ・ 音が出ます<br />
+        矢印キー / 画面の端 で見まわす ・ クリックで調べる
+      </div>
+    </div>
+
+    <div class="screen" id="end">
+      <div class="kicker" id="end-kicker">END</div>
+      <h2 id="end-title"></h2>
+      <p id="end-text"></p>
+      <button class="btn" id="againBtn">もう一度</button>
+    </div>
+
+    <div id="changelog">
+      <h3>3時44分 — 更新履歴</h3>
+      <div id="changelog-body"></div>
+      <button class="btn" onclick="document.getElementById('changelog').classList.remove('show')">とじる</button>
+    </div>
+
+    <div id="debug">
+      <div>DEBUG</div>
+      <button data-add="-15">−15分</button>
+      <button data-add="15">+15分</button>
+      <button data-add="60">+1時間</button>
+      <button id="dbg-344">3:43にする</button>
+      <button id="dbg-flags">フラグ全部</button>
+      <span id="dbg-info"></span>
+    </div>
+    <div id="version-badge" onclick="document.getElementById('changelog').classList.add('show')">v0.1.0</div>
+  </div>
+</div>
+
+<script src="js/version.js"></script>
+<script src="js/art.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
