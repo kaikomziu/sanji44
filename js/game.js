@@ -342,12 +342,20 @@
     if (!entry) return;
     insTitle.textContent = entry.title || 'しらべる';
     insCh.innerHTML = '';
-    // art
+    // art — バッファを実表示サイズに合わせて 560x350 の座標系を等倍で拡縮
     if (entry.art || entry.note) {
       insArt.classList.remove('hidden');
       var env = envObj();
       if (entry.note) env._noteLines = entry.note;
-      insAx.clearRect(0, 0, 560, 350);
+      var cw = insArt.clientWidth || 520;
+      var dpr = Math.min(2, window.devicePixelRatio || 1);
+      insArt.width = Math.round(cw * dpr);
+      insArt.height = Math.round(cw * (350 / 560) * dpr);
+      insArt.style.height = Math.round(cw * (350 / 560)) + 'px';
+      insAx.setTransform(1, 0, 0, 1, 0, 0);
+      insAx.clearRect(0, 0, insArt.width, insArt.height);
+      var sc = (cw * dpr) / 560;
+      insAx.setTransform(sc, 0, 0, sc, 0, 0);
       window.ART.paintInspect(insAx, entry.art || 'note', env);
     } else {
       insArt.classList.add('hidden');

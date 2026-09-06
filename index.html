@@ -23,7 +23,7 @@
   html,body{height:100%;background:var(--ink);color:#c9d4de;font-family:var(--serif);overflow:hidden;overscroll-behavior:none}
   #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 120% at 50% 40%,#0a0f16 0%,#05070b 70%)}
   #frame{position:relative;width:100%;height:100%;max-width:calc(100vh * 1.6);max-height:calc(100vw / 1.6)}
-  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;image-rendering:auto;touch-action:none}
+  #game{position:absolute;inset:0;width:100%;height:100%;display:block;image-rendering:auto;touch-action:none}
   /* ---- HUD ---- */
   #hud{position:absolute;inset:0;pointer-events:none;font-family:var(--mono)}
   #clock{position:absolute;top:3.2%;left:50%;transform:translateX(-50%);font-size:clamp(18px,3.4vw,30px);letter-spacing:.22em;color:#cdd9e4;text-shadow:0 0 14px rgba(0,0,0,.9),0 0 30px rgba(120,150,180,.15);transition:color .6s,text-shadow .6s}
@@ -45,10 +45,10 @@
   /* ---- inspect overlay ---- */
   #inspect{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(3,5,8,.66);backdrop-filter:blur(3px);pointer-events:auto;padding:5%}
   #inspect.show{display:flex}
-  #ins-card{position:relative;width:min(560px,92%);max-height:86%;overflow:hidden;background:linear-gradient(180deg,#0e141d,#0a0e15);border:1px solid var(--line);box-shadow:0 30px 90px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.03);display:flex;flex-direction:column}
-  #ins-art{width:100%;aspect-ratio:16/10;background:#070a0f;border-bottom:1px solid var(--line);display:block}
+  #ins-card{position:relative;width:min(560px,92%);max-height:90vh;overflow:hidden;background:linear-gradient(180deg,#0e141d,#0a0e15);border:1px solid var(--line);box-shadow:0 30px 90px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.03);display:flex;flex-direction:column}
+  #ins-art{flex:0 0 auto;display:block;width:100%;height:auto;background:#070a0f;border-bottom:1px solid var(--line)}
   #ins-art.hidden{display:none}
-  #ins-body{padding:22px 24px 20px;overflow-y:auto;font-family:var(--serif)}
+  #ins-body{flex:1 1 auto;min-height:0;padding:22px 24px 20px;overflow-y:auto;font-family:var(--serif)}
   #ins-title{font-family:var(--mono);font-size:12px;letter-spacing:.24em;color:var(--dim);text-transform:uppercase;margin-bottom:12px}
   #ins-text{font-size:16px;line-height:2.0;color:#dbe3ea;white-space:pre-wrap;min-height:2em}
   #ins-text .p{font-family:var(--paper-ink);color:var(--paper);background:linear-gradient(180deg,#d8c7a2,#c9b590);color:#2a2013;padding:14px 16px;margin:10px 0;font-family:var(--serif);box-shadow:0 8px 24px rgba(0,0,0,.5);transform:rotate(-.4deg)}
@@ -157,7 +157,7 @@
       <button id="dbg-flags">フラグ全部</button>
       <span id="dbg-info"></span>
     </div>
-    <div id="version-badge" onclick="document.getElementById('changelog').classList.add('show')">v0.1.0</div>
+    <div id="version-badge" onclick="document.getElementById('changelog').classList.add('show')">v0.1.1</div>
   </div>
 </div>
 
