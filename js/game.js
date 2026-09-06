@@ -556,21 +556,105 @@
     bad_peep: { k: 'BAD END', t: '見てしまった', p: 'のぞき穴に 目を 当てた。廊下いっぱいの 白い 顔が、こちらを のぞき返していた。\n——あの夜も、あなたは そうした。ドアを 開けず、のぞいて、居留守を 使った。\n時計は また、3時44分に 戻る。あなたが ドアを 開けるまで、何度でも。' },
     bad_wait: { k: 'BAD END', t: 'また、開けなかった', p: 'ノックが 鳴りやむまで、ベッドで 息を ひそめていた。\nあの夜と、同じだ。\n朝は 来ない。時計は 3時44分から 進まない。\nドアの 向こうで、小さな 声が する。「……まってるよ」' },
   };
+  var CIN_DUR = { bad_peep: 2.0, bad_wait: 3.4, normal: 3.4, true: 3.0 };
   function ending(key) {
     if (S.ended) return;
     S.ended = true;
+    _knockTok++;                 // ノックループを止める
     closePanel();
-    var e = END[key];
-    if (key === 'true') { tone(330, 2.2, 'sine', 0.18, 494); setTimeout(function () { tone(440, 2.6, 'sine', 0.14); }, 300); }
-    else if (key === 'normal') { tone(120, 2.6, 'sine', 0.16, 70); }
-    else { noiseBurst(0.5, 0.5); tone(140, 1.4, 'sawtooth', 0.3, 40); }
-    if (AU.on) AU.master.gain.linearRampToValueAtTime(key.indexOf('bad') === 0 ? 0.0 : 0.02, AU.ctx.currentTime + 2.5);
+    hpEl.classList.remove('show');
+    reticleEl.classList.remove('on'); hotlabelEl.classList.remove('on');
+    subEl.classList.remove('show');
+    S.cin = { key: key, t: 0, dur: CIN_DUR[key] || 3.0 };
+    cinemaAudio(key);
+    // rAF が止まっていても（タブ非表示など）必ずエンド画面へ進むフォールバック
     setTimeout(function () {
-      document.getElementById('end-kicker').textContent = e.k;
-      document.getElementById('end-title').textContent = e.t;
-      document.getElementById('end-text').textContent = e.p;
-      document.getElementById('end').classList.add('show');
-    }, key.indexOf('bad') === 0 ? 900 : 2200);
+      if (S && S.ended && S.cin && S.cin.key === key) { S.cin = null; revealEnd(key); }
+    }, (CIN_DUR[key] || 3.0) * 1000 + 500);
+  }
+
+  function windSweep() {
+    if (!AU.on) return;
+    var b = AU.ctx.createBuffer(1, AU.ctx.sampleRate * 3.4, AU.ctx.sampleRate);
+    var d = b.getChannelData(0);
+    for (var i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1);
+    var s = AU.ctx.createBufferSource(); s.buffer = b;
+    var f = AU.ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.2;
+    f.frequency.setValueAtTime(300, AU.ctx.currentTime);
+    f.frequency.linearRampToValueAtTime(900, AU.ctx.currentTime + 1.6);
+    f.frequency.linearRampToValueAtTime(220, AU.ctx.currentTime + 3.3);
+    var g = AU.ctx.createGain(); g.gain.value = 0.0;
+    g.gain.linearRampToValueAtTime(0.16, AU.ctx.currentTime + 0.8);
+    g.gain.linearRampToValueAtTime(0.0, AU.ctx.currentTime + 3.3);
+    s.connect(f); f.connect(g); g.connect(AU.master); s.start();
+  }
+  function breath(vol) {
+    if (!AU.on) return;
+    var dur = 1.1;
+    var b = AU.ctx.createBuffer(1, AU.ctx.sampleRate * dur, AU.ctx.sampleRate);
+    var d = b.getChannelData(0);
+    for (var i = 0; i < d.length; i++) {
+      var e = Math.sin(Math.PI * i / d.length);
+      d[i] = (Math.random() * 2 - 1) * e * e;
+    }
+    var s = AU.ctx.createBufferSource(); s.buffer = b;
+    var f = AU.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
+    var g = AU.ctx.createGain(); g.gain.value = vol || 0.3;
+    s.connect(f); f.connect(g); g.connect(AU.master); s.start();
+  }
+  function cinemaAudio(key) {
+    if (key === 'bad_peep') {
+      setTimeout(function () {
+        noiseBurst(0.6, 1.0);
+        tone(1950, 0.5, 'sawtooth', 0.55, 170);
+        tone(2600, 0.4, 'square', 0.3, 300);
+        tone(52, 1.1, 'square', 0.6, 24);
+      }, 300);
+      for (var k = 0; k < 6; k++) (function (d) { setTimeout(function () { noiseBurst(0.035, 0.5); }, 520 + d * 42); })(k);
+      setTimeout(function () { if (AU.on) AU.master.gain.linearRampToValueAtTime(0.0001, AU.ctx.currentTime + 0.25); }, 900);
+      setTimeout(function () { if (AU.on) AU.master.gain.value = 0.05; breath(0.34); }, 1300);
+      setTimeout(function () { breath(0.3); }, 1900);
+    } else if (key === 'bad_wait') {
+      knock();
+      setTimeout(knock, 900);
+      setTimeout(function () { tone(60, 0.24, 'sine', 0.5, 34); }, 2100);   // 最後の一撃、重く
+      setTimeout(function () { if (AU.on) AU.master.gain.linearRampToValueAtTime(0.0001, AU.ctx.currentTime + 0.4); }, 2400);
+      setTimeout(function () { if (AU.on) AU.master.gain.value = 0.05; noiseBurst(0.14, 0.55); }, 2900); // 息を吸う音
+      setTimeout(function () { whisper(); }, 3050);
+    } else if (key === 'normal') {
+      windSweep();
+      setTimeout(function () { if (AU.on) AU.master.gain.linearRampToValueAtTime(0.02, AU.ctx.currentTime + 2.5); }, 400);
+    } else {
+      tone(330, 2.6, 'sine', 0.16, 494);
+      setTimeout(function () { tone(440, 2.6, 'sine', 0.13); }, 320);
+      setTimeout(function () { tone(587, 2.2, 'sine', 0.1); }, 720);
+      if (AU.on) AU.master.gain.linearRampToValueAtTime(0.03, AU.ctx.currentTime + 2.6);
+    }
+  }
+
+  function revealEnd(key) {
+    var e = END[key];
+    var kEl = document.getElementById('end-kicker'),
+      tEl = document.getElementById('end-title'),
+      pEl = document.getElementById('end-text'),
+      endEl = document.getElementById('end');
+    kEl.textContent = e.k;
+    tEl.textContent = e.t;
+    endEl.classList.toggle('bad', key.indexOf('bad') === 0);
+    endEl.classList.add('show');
+    // 本文を1文字ずつ、たまにフリッカーしながら
+    pEl.textContent = '';
+    var i = 0, bad = key.indexOf('bad') === 0;
+    clearInterval(revealEnd._t);
+    revealEnd._t = setInterval(function () {
+      i += 1;
+      pEl.textContent = e.p.slice(0, i);
+      if (bad && Math.random() < 0.06) {
+        pEl.style.opacity = '0.15';
+        setTimeout(function () { pEl.style.opacity = '1'; }, 45);
+      }
+      if (i >= e.p.length) clearInterval(revealEnd._t);
+    }, bad ? 34 : 26);
   }
 
   // ---------- env for ART ----------
@@ -601,6 +685,27 @@
     if (!S || document.hidden) return;
     var dt = Math.min(0.05, (now - (frame._l || now)) / 1000);
     frame._l = now;
+
+    // エンド演出（キネマ）
+    if (S.cin) {
+      S.cin.t += dt; S.t += dt;
+      ctx.setTransform(fit.dpr, 0, 0, fit.dpr, 0, 0);
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.save();
+      ctx.translate(fit.ox, fit.oy); ctx.scale(fit.s, fit.s);
+      ctx.beginPath(); ctx.rect(0, 0, VW, VH); ctx.clip();
+      var bad = S.cin.key.indexOf('bad') === 0;
+      if (bad) {
+        var sh = Math.max(0, 1 - S.cin.t / S.cin.dur);
+        // bad_peep は序盤に激しく、bad_wait は終盤の一瞬だけ
+        var amp = S.cin.key === 'bad_peep' ? 30 * sh : (S.cin.t > 2.6 && S.cin.t < 3.1 ? 22 : 3);
+        ctx.translate((Math.random() - 0.5) * amp, (Math.random() - 0.5) * amp);
+      }
+      window.ART.cinema(ctx, S.cin, envObj());
+      ctx.restore();
+      if (S.cin.t >= S.cin.dur) { revealEnd(S.cin.key); S.cin = null; }
+      return;
+    }
     // エンド画面は不透明なので背後の描画は止める（負荷対策）
     if (S.ended) return;
     S.t += dt;
@@ -746,8 +851,10 @@
   function begin() {
     S = freshState();
     if (START_CLOCK != null) S.clock = START_CLOCK;
+    clearInterval(revealEnd._t);
     document.getElementById('title').classList.remove('show');
-    document.getElementById('end').classList.remove('show');
+    document.getElementById('end').classList.remove('show', 'bad');
+    document.getElementById('end-text').style.opacity = '1';
     document.getElementById('hourprompt').classList.remove('show');
     document.getElementById('fade').classList.remove('on');
     document.getElementById('roomname').classList.remove('on');
